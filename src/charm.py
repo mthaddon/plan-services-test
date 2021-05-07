@@ -34,6 +34,22 @@ class PlanServicesTestCharm(CharmBase):
         self.framework.observe(self.on.fortune_action, self._on_fortune_action)
         self._stored.set_default(things=[])
 
+    def _pebble_layer(self):
+        """Return a dict to be used with pebble."""
+        return {
+            "summary": "httpbin layer",
+            "description": "pebble config layer for httpbin",
+            "services": {
+                "httpbin": {
+                    "override": "replace",
+                    "summary": "httpbin",
+                    "command": "gunicorn -b 0.0.0.0:80 httpbin:app -k gevent",
+                    "startup": "enabled",
+                    "environment": {"thing": self.model.config["thing"]},
+                }
+            },
+        }
+
     def _on_httpbin_pebble_ready(self, event):
         """Define and start a workload using the Pebble API.
 
@@ -47,19 +63,7 @@ class PlanServicesTestCharm(CharmBase):
         # Get a reference the container attribute on the PebbleReadyEvent
         container = event.workload
         # Define an initial Pebble layer configuration
-        pebble_layer = {
-            "summary": "httpbin layer",
-            "description": "pebble config layer for httpbin",
-            "services": {
-                "httpbin": {
-                    "override": "replace",
-                    "summary": "httpbin",
-                    "command": "gunicorn -b 0.0.0.0:80 httpbin:app -k gevent",
-                    "startup": "enabled",
-                    "environment": {"thing": self.model.config["thing"]},
-                }
-            },
-        }
+        pebble_layer = self._pebble_layer()
         # Add intial Pebble config layer using the Pebble API
         container.add_layer("httpbin", pebble_layer, combine=True)
         # Autostart any services that were defined with startup: enabled
@@ -78,10 +82,15 @@ class PlanServicesTestCharm(CharmBase):
 
         Learn more about config at https://juju.is/docs/sdk/config
         """
-        current = self.config["thing"]
-        if current not in self._stored.things:
-            logger.debug("found a new thing: %r", current)
-            self._stored.things.append(current)
+        container = self.unit.get_container("httpbin")
+        pebble_layer = self._pebble_layer()
+        plan = container.get_plan()
+        if plan.services != pebble_layer["services"]:
+            container.add_layer("httpbin", pebble_layer, combine=True)
+            if container.get_service("httpbin").is_running():
+                container.stop("httpbin")
+            container.start("httpbin")
+        self.unit.status = ActiveStatus()
 
     def _on_fortune_action(self, event):
         """Just an example to show how to receive actions.
